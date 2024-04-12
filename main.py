@@ -5,8 +5,14 @@ from telebot import types
 import config
 import json
 import sqlite3
+import os
+from os.path import join, dirname
+from dotenv import load_dotenv
 
-TOKEN = config.BOT_TOKEN
+dotenv_path = join(dirname(__file__), '.env')
+load_dotenv(dotenv_path)
+
+TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
 

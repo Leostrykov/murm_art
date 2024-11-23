@@ -1,9 +1,5 @@
 import telebot
-import time
-import asyncio
 from telebot import types
-import config
-import json
 import sqlite3
 import os
 from os.path import join, dirname
@@ -13,6 +9,7 @@ dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
 
 TOKEN = os.getenv('BOT_TOKEN')
+ADMINS = os.getenv('ADMINS').split(';')
 bot = telebot.TeleBot(TOKEN)
 
 
@@ -68,10 +65,10 @@ def help_message(message):
                      'номер арта и получите о нём информацию и постройте к нему машрут')
 
 
-# команда mailing доступна только для администраторов. Для добавления администратора в config.ADMINS добавьте user_id
+# команда mailing доступна только для администраторов. Для добавления администратора в .env ADMINS добавьте user_id
 @bot.message_handler(commands=['mailing'])
 def mailing(message):
-    if message.from_user.id in config.ADMINS:
+    if message.from_user.id in ADMINS:
         murkup = types.ReplyKeyboardMarkup()
         murkup.add(types.KeyboardButton('Отмена'))
         bot.send_message(message.chat.id, 'Отправьте сообщение для рассылки.', reply_markup=murkup)
@@ -262,9 +259,4 @@ def text(message):
             bot.send_message(message.chat.id, 'Не сущевствующий мурал')
 
 
-while True:
-    try:
-        asyncio.run(bot.polling(non_stop=True, interval=1, timeout=0))
-    except:
-        print('Restart')
-        time.sleep(5)
+bot.polling(non_stop=True, interval=1, timeout=0)

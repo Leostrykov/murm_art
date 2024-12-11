@@ -170,7 +170,7 @@ def map_author_sort(message):
         bot.send_photo(message.chat.id, map_link, reply_markup=types.ReplyKeyboardRemove())
     else:
         bot.send_message(message.chat.id, 'Автор не найден', reply_markup=types.ReplyKeyboardRemove())
-    bot.delete_message(callback.message.chat.id, callback.message.message_id)
+    bot.delete_message(message.chat.id, message.message_id)
 
 
 # тип контента текст, вывод информации об объекте по его id

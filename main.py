@@ -4,6 +4,14 @@ import sqlite3
 import os
 from os.path import join, dirname
 from dotenv import load_dotenv
+from data import db_session
+from data.User import User
+from data.StreetArt import StreetArt
+from data.Districts import Districts
+from data.Authors import Authors
+from data.StreetArtAuthors import StreetArtAuthors
+from data.Visited import Visited
+from sqlalchemy import func
 
 dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
@@ -12,47 +20,27 @@ TOKEN = os.getenv('BOT_TOKEN')
 ADMINS = os.getenv('ADMINS').split(';')
 bot = telebot.TeleBot(TOKEN)
 
+db_session.global_init('data_base.sqlite')
+
 
 # функция для выдачи достижения
+# TODO убрать функцию достижений
 def achievements(user, place, message, cursor):
     if user[4] == 0:
         bot.send_message(message.chat.id, 'Разблокировано достижение "Первый шаг"')
         cursor.execute('UPDATE users SET achievement_first_step = true WHERE user_id = %s' % message.from_user.id)
 
 
-# создание таблицы users если её нет
-def create_table():
-    db = sqlite3.connect('data_base.sqlite')
-    cur = db.cursor()
-    cur.execute(
-        '''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY, 
-        username VARCHAR(50), 
-        user_id INT unique, 
-        chat_id INT unique, 
-        achievement_first_step BOOLEAN DEFAULT(0), 
-        visited TEXT DEFAULT "[]", 
-        rating INT DEFAULT(0), 
-        last_art INT DEFAULT(0))''')
-    db.commit()
-    cur.close()
-    db.close()
-
-
-create_table()
-
-
-# команда start, регистрация пользователя и привествие
+# команда start, регистрация пользователя и приветствие
 @bot.message_handler(commands=["start"])
 def start(message):
     bot.send_message(message.chat.id, f'Привет {message.from_user.first_name}')
-    db = sqlite3.connect('data_base.sqlite')
-    cur = db.cursor()
-    cur.execute('''INSERT OR IGNORE INTO users (username, user_id, chat_id) VALUES ("%s", %s, %s)''' %
-                (message.from_user.username, message.from_user.id, message.chat.id))
-    db.commit()
-    cur.close()
-    db.close()
+    db_sess = db_session.create_session()
+    if not db_sess.query(User).filter(User.tg_id == message.from_user.id).first():
+        user = User(username=message.from_user.username, tg_id=message.from_user.id)
+        db_sess.add(user)
+        db_sess.commit()
+        db_sess.close()
 
 
 # команда help
@@ -68,7 +56,7 @@ def help_message(message):
 # команда mailing доступна только для администраторов. Для добавления администратора в .env ADMINS добавьте user_id
 @bot.message_handler(commands=['mailing'])
 def mailing(message):
-    if message.from_user.id in ADMINS:
+    if str(message.from_user.id) in ADMINS:
         murkup = types.ReplyKeyboardMarkup()
         murkup.add(types.KeyboardButton('Отмена'))
         bot.send_message(message.chat.id, 'Отправьте сообщение для рассылки.', reply_markup=murkup)
@@ -77,24 +65,21 @@ def mailing(message):
 
 def mailing_for_users(message):
     if message.text != 'Отмена':
-        db = sqlite3.connect('data_base.sqlite')
-        cur = db.cursor()
+        db_sess = db_session.create_session()
+        recipients = db_sess.query(User).all()
         if message.content_type == 'photo':
-            cur.execute('SELECT chat_id FROM users')
             photo_mailing = message.photo
-            for person_id in cur.fetchall():
-                bot.send_photo(person_id[0], photo_mailing[0].file_id, message.caption)
+            for person_id in recipients:
+                bot.send_photo(person_id.tg_id, photo_mailing[0].file_id, message.caption)
         elif message.content_type == 'text':
-            cur.execute('SELECT chat_id FROM users')
             text_mailing = message.text
-            for person_id in cur.fetchall():
-                bot.send_message(person_id[0], text_mailing)
+            for person_id in recipients:
+                bot.send_message(person_id.tg_id, text_mailing)
         else:
             bot.send_message(message.chat.id, 'Формат сообщения не поддерживается.'
                                               'Только фото или фото с текстом или текст.')
         bot.send_message(message.chat.id, 'Рассылка окончена', reply_markup=types.ReplyKeyboardRemove())
-        cur.close()
-        db.close()
+        db_sess.close()
     else:
         bot.send_message(message.chat.id, 'Рассылка отменена', reply_markup=types.ReplyKeyboardRemove())
 
@@ -102,51 +87,55 @@ def mailing_for_users(message):
 # определение местоположения пользователя
 @bot.message_handler(content_types=['location'])
 def get_location(message):
-    longitude = message.location.longitude
-    latitude = message.location.latitude
-    db = sqlite3.connect('data_base.sqlite')
-    cur = db.cursor()
-    cur.execute('SELECT * FROM users WHERE user_id = %s' % message.from_user.id)
-    user_inf = cur.fetchone()
-    cur.execute('''SELECT * FROM street_art
-                WHERE
-                    longitude BETWEEN (%s - 0.0003) AND (%s + 0.0003) AND
-                    latitude BETWEEN (%s - 0.0003) AND (%s + 0.0003) AND
-                    id <> %s
-                ORDER BY (
-                        (longitude - %s) * (longitude - %s) +
-                        (latitude - %s) * (latitude - %s)
-                    );
-                ''' % (longitude, longitude, latitude, latitude, user_inf[7], longitude, longitude, latitude, latitude))
-    place_inf = cur.fetchone()
-    # подверждение пользователя в точке
-    if place_inf is not None and user_inf[7] != place_inf[0]:
-        bot.send_photo(message.chat.id, place_inf[8], f'{place_inf[1]}\n{place_inf[4]}')
+    user_longitude = message.location.longitude
+    user_latitude = message.location.latitude
+    db_sess = db_session.create_session()
+
+    user = db_sess.query(User).filter(User.tg_id == message.from_user.id).first()
+    # cur.execute('''SELECT * FROM street_art
+    #             WHERE
+    #                 longitude BETWEEN (%s - 0.0003) AND (%s + 0.0003) AND
+    #                 latitude BETWEEN (%s - 0.0003) AND (%s + 0.0003) AND
+    #                 id <> %s
+    #             ORDER BY (
+    #                     (longitude - %s) * (longitude - %s) +
+    #                     (latitude - %s) * (latitude - %s)
+    #                 );
+    #             ''' % (longitude, longitude, latitude, latitude, user_inf[7], longitude, longitude,
+    #             latitude, latitude))
+
+    arts = db_sess.query(StreetArt).filter(
+        StreetArt.longitude.between(user_longitude - 0.0003, user_longitude + 0.0003),
+        StreetArt.latitude.between(user_latitude - 0.0003, user_latitude + 0.0003)).order_by(
+        func.pow(StreetArt.longitude - user_longitude, 2) + func.pow(StreetArt.latitude - user_latitude, 2)).first()
+
+    # подтверждение пользователя в точке
+    if arts is not None:
+        bot.send_photo(message.chat.id, arts.photo, f'{arts.name}\n{arts.about}')
         # повышение рейтинга, если пользователь не приходил раньше
-        visited_arts = json.loads(user_inf[5])
-        if place_inf[0] not in visited_arts:
+        if db_sess.query(Visited).filter(Visited.user_id == user.id, Visited.art_id == arts.id).first():
             bot.send_message(message.chat.id, 'Вы пришли в новое место')
-            visited_arts.append(place_inf[0])
-            cur.execute('UPDATE users SET visited = "%s", rating = rating + 1 WHERE user_id = %s'
-                        % (json.dumps(visited_arts), message.from_user.id))
-        achievements(user_inf, place_inf, message, cur)
-        cur.execute('UPDATE users SET last_art = %s WHERE user_id = %s' %
-                    (place_inf[0], message.from_user.id))
+            db_sess.add(Visited(user_id=user.id, art_id=arts.id))
+            db_sess.commit()
     else:
         # нахождение ближайшего арта исключая недавно посещённый
-        cur.execute('''SELECT id, name, longitude, latitude, about, photo, address 
-                    FROM street_art
-                    WHERE id <> %s
-                    ORDER BY (
-                        (longitude - %s) * (longitude - %s) +
-                        (latitude - %s) * (latitude - %s)
-                    ) ASC
-                    LIMIT 10;
-        ''' % (user_inf[7], longitude, longitude, latitude, latitude))
-        closer_art = cur.fetchall()
-        coords = [f'{i[2]},{i[3]},pm2rdm{i[0]}' for i in closer_art]
+        # cur.execute('''SELECT id, name, longitude, latitude, about, photo, address
+        #             FROM street_art
+        #             WHERE id <> %s
+        #             ORDER BY (
+        #                 (longitude - %s) * (longitude - %s) +
+        #                 (latitude - %s) * (latitude - %s)
+        #             ) ASC
+        #             LIMIT 10;
+        # ''' % (user_inf[7], longitude, longitude, latitude, latitude))
+        closer_art = db_sess.query(StreetArt).order_by(
+                        func.pow(StreetArt.longitude - user_longitude, 2) +
+                        func.pow(StreetArt.latitude - user_latitude, 2)).limit(10).all()
+
+        # TODO: Сделать отдельную функцию для генерации карты
+        coords = [f'{i.longitude},{i.latitude},pm2rdm{i.id}' for i in closer_art]
         map_link = f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&size=300,' \
-                   f'300&scale=1.0&pt={longitude},{latitude},ya_ru~{"~".join(coords)}'
+                   f'300&scale=1.0&pt={user_longitude},{user_latitude},ya_ru~{"~".join(coords)}'
         bot.send_photo(message.chat.id, map_link, "Вот несколько ближайших от вас артов")
         # ""murkup = types.InlineKeyboardMarkup()
         #         murkup.add(types.InlineKeyboardButton('Построить машрут',
@@ -156,10 +145,6 @@ def get_location(message):
         #                        f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&'
         #                        f'size=300,300&scale=1.0&z=15&pt={closer_art[2]},{closer_art[1]},pm2rdm',
         #                        f"Ближайщий от вас арт: {closer_art[0]}\nАдрес:{closer_art[5]}", reply_markup=murkup)""
-
-    db.commit()
-    cur.close()
-    db.close()
 
 
 # команда map для отправки карты артов

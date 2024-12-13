@@ -8,7 +8,7 @@ class User(SqlAlchemyBase):
 
     id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True, autoincrement=True)
     username = sqlalchemy.Column(sqlalchemy.String)
-    tg_id = sqlalchemy.Column(sqlalchemy.Integer)
+    tg_id = sqlalchemy.Column(sqlalchemy.Integer, unique=True)
     rating = sqlalchemy.Column(sqlalchemy.Integer, default=0)
 
     visited = orm.relationship('Visited', back_populates='user')

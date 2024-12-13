@@ -7,7 +7,7 @@ class StreetArt(SqlAlchemyBase):
     __tablename__ = 'street_art'
 
     id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True, autoincrement=True)
-    name = sqlalchemy.Column(sqlalchemy.String)
+    name = sqlalchemy.Column(sqlalchemy.String, unique=True)
     longitude = sqlalchemy.Column(sqlalchemy.Float)
     latitude = sqlalchemy.Column(sqlalchemy.Float)
     about = sqlalchemy.Column(sqlalchemy.String, nullable=True)

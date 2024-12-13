@@ -12,7 +12,7 @@ from data.Authors import Authors
 from data.StreetArtAuthors import StreetArtAuthors
 from data.Visited import Visited
 from sqlalchemy import func
-from get_photo_file import get_photo_file
+from get_photo_file import get_photo_file, get_group_photo_files
 from renders_map import render_some_points_map
 
 dotenv_path = join(dirname(__file__), '.env')
@@ -50,7 +50,7 @@ def help_message(message):
                      'Отправьте свою геолокацию для нахождения ближайшего арт-объекта'
                      '\n/map - для открытия карты стрит артов с номерами и '
                      'сортировкой по районам\nВведите '
-                     'номер арта тз карты и получите о нём информацию и постройте к нему маршрут')
+                     'номер арта из карты и получите о нём информацию и постройте к нему маршрут')
 
 
 # команда mailing доступна только для администраторов. Для добавления администратора в .env ADMINS добавьте user_id
@@ -94,27 +94,29 @@ def get_location(message):
     db_sess = db_session.create_session()
 
     user = db_sess.query(User).filter(User.tg_id == message.from_user.id).first()
-    arts = db_sess.query(StreetArt).filter(
-        StreetArt.longitude.between(user_longitude - 0.0003, user_longitude + 0.0003),
-        StreetArt.latitude.between(user_latitude - 0.0003, user_latitude + 0.0003)).order_by(
+    art = db_sess.query(StreetArt).filter(
+        StreetArt.longitude.between(user_longitude - 0.0006, user_longitude + 0.0006),
+        StreetArt.latitude.between(user_latitude - 0.0006, user_latitude + 0.0006)).order_by(
         func.pow(StreetArt.longitude - user_longitude, 2) + func.pow(StreetArt.latitude - user_latitude, 2)).first()
 
     # подтверждение пользователя в точке
-    if arts is not None:
-        bot.send_photo(message.chat.id, get_photo_file(arts.photo),
-                       f'{arts.name}\n{arts.about}')
+    if art is not None:
+        authors = db_sess.query(Authors).join(StreetArtAuthors).filter(StreetArtAuthors.art_id == art.id).all()
+        bot.send_media_group(message.chat.id, get_group_photo_files(art.photo))
+        bot.send_message(message.chat.id,
+                         f'{art.name}\nАвторы: {" ".join([i.name for i in authors])}\n'
+                         f'Адрес: {art.address}\n{art.about}')
         # повышение рейтинга, если пользователь не приходил раньше
-        if db_sess.query(Visited).filter(Visited.user_id == user.id, Visited.art_id == arts.id).first():
-            bot.send_message(message.chat.id, 'Вы пришли в новое место')
-            db_sess.add(Visited(user_id=user.id, art_id=arts.id))
+        if not db_sess.query(Visited).filter(Visited.user_id == user.id, Visited.art_id == art.id).first():
+            bot.send_message(message.chat.id, 'Вы пришли в новое ')
+            db_sess.add(Visited(user_id=user.id, art_id=art.id))
             db_sess.commit()
     else:
         closer_art = db_sess.query(StreetArt).order_by(
                         func.pow(StreetArt.longitude - user_longitude, 2) +
                         func.pow(StreetArt.latitude - user_latitude, 2)).limit(5).all()
-
-        # TODO: Сделать отдельную функцию для генерации карты
-        bot.send_photo(message.chat.id, render_some_points_map(closer_art, (user_longitude, user_latitude)), "Вот несколько ближайших от вас артов")
+        bot.send_photo(message.chat.id, render_some_points_map(closer_art, (user_longitude, user_latitude)),
+                       "Вот несколько ближайших от вас артов")
     db_sess.close()
 
 
@@ -155,7 +157,7 @@ def map_sort(callback):
             points = db_sess.query(StreetArt).join(Districts).filter(Districts.name == 'Октябрьский')
         elif callback.data == 'pervomaisky':
             points = db_sess.query(StreetArt).join(Districts).filter(Districts.name == 'Первомайский')
-        bot.send_photo(callback.message.chat.id, render_some_points_map(points, z=13))
+        bot.send_photo(callback.message.chat.id, render_some_points_map(points))
     bot.delete_message(callback.message.chat.id, callback.message.message_id)
     db_sess.close()
 
@@ -183,10 +185,11 @@ def text(message):
             murkup.add(types.InlineKeyboardButton('Построить машрут',
                                                   url=f'https://yandex.ru/maps/?rtext='
                                                       f'~{art.latitude},{art.longitude}&rtt=pd'))
-            bot.send_photo(message.chat.id,
-                           f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&'
-                           f'size=300,300&scale=1.0&z=15&pt={art.longitude},{art.latitude},pm2rdm',
-                           f"{art.name}\nАдрес:{art.address}", reply_markup=murkup)
+            authors = db_sess.query(Authors).join(StreetArtAuthors).filter(StreetArtAuthors.art_id == art.id).all()
+            bot.send_media_group(message.chat.id, get_group_photo_files(art.photo))
+            bot.send_message(message.chat.id,
+                             f'{art.name}\nАвторы: {" ".join([i.name for i in authors])}\n'
+                             f'Адрес: {art.address}\n{art.about}', reply_markup=murkup)
             db_sess.close()
         else:
             bot.send_message(message.chat.id, 'Не сущевствующий мурал')

@@ -7,6 +7,6 @@ class Authors(SqlAlchemyBase):
     __tablename__ = 'authors'
 
     id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True, autoincrement=True)
-    name = sqlalchemy.Column(sqlalchemy.String, nullable=False)
+    name = sqlalchemy.Column(sqlalchemy.String, nullable=False, unique=True)
     street_art_authors = orm.relationship('StreetArtAuthors', back_populates='authors')
 

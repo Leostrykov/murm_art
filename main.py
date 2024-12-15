@@ -108,7 +108,6 @@ def get_location(message):
                          f'Адрес: {art.address}\n{art.about}')
         # повышение рейтинга, если пользователь не приходил раньше
         if not db_sess.query(Visited).filter(Visited.user_id == user.id, Visited.art_id == art.id).first():
-            bot.send_message(message.chat.id, 'Вы пришли в новое ')
             db_sess.add(Visited(user_id=user.id, art_id=art.id))
             db_sess.commit()
     else:
@@ -133,7 +132,7 @@ def map_streetart(message):
     db_sess = db_session.create_session()
     coords = [f'{i.longitude},{i.latitude},pm2rdm{i.id}' for i in db_sess.query(StreetArt).all()]
     map_link = f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&size=300,' \
-               f'300&scale=1.0&pt={"~".join(coords)}'
+               f'300&scale=1.0&pt={"~".join(coords)}&z=10'
     murkup = types.InlineKeyboardMarkup()
     murkup.add(types.InlineKeyboardButton('Первомайский округ', callback_data='pervomaisky'))
     murkup.add(types.InlineKeyboardButton('Октябрьский округ', callback_data='oktyabrsky'))

@@ -128,7 +128,6 @@ def get_location(message):
 @bot.message_handler(commands=['map'])
 def map_streetart(message):
     bot.delete_message(message.chat.id, message.message_id)
-    bot.delete_message(message.chat.id, message.message_id - 1)
     db_sess = db_session.create_session()
     coords = [f'{i.longitude},{i.latitude},pm2rdm{i.id}' for i in db_sess.query(StreetArt).all()]
     map_link = f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&size=300,' \

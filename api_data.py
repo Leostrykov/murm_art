@@ -14,7 +14,7 @@ blueprint = flask.Blueprint(
 db_session.global_init('data_base.sqlite')
 
 
-@blueprint.route('/api/arts_data', method=['GET'])
+@blueprint.route('/api/arts_data', methods=['GET'])
 def get_data():
     db_session.global_init('data_base.sqlite')
     db_sess = db_session.create_session()

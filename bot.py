@@ -25,6 +25,15 @@ bot = telebot.TeleBot(TOKEN)
 db_session.global_init('data_base.sqlite')
 
 
+def webAppKeyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    web_app_test = types.WebAppInfo("https://leostrykov.github.io/murm-art-map/")
+    one_butt = types.KeyboardButton(text="Карта артов", web_app=web_app_test)
+    keyboard.add(one_butt)
+
+    return keyboard
+
+
 # команда start, регистрация пользователя и приветствие
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -34,7 +43,8 @@ def start(message):
     Что же я могу?\n
         — Расскажу вам о самых интересных и значимых объектах\.
         — Помогу найти ближайший арт \- объект и проложить к нему маршрут\. Просто отправь мне свою геолокацию\.
-        — Буду рад уведомить вас о новых событиях и открытиях, связанных с искусством\.''', parse_mode='MarkdownV2')
+        — Буду рад уведомить вас о новых событиях и открытиях, связанных с искусством\.''', parse_mode='MarkdownV2',
+                     reply_markup=webAppKeyboard())
     db_sess = db_session.create_session()
     if not db_sess.query(User).filter(User.tg_id == message.from_user.id).first():
         user = User(username=message.from_user.username, tg_id=message.from_user.id)
@@ -50,14 +60,15 @@ def help_message(message):
                      'Отправьте свою геолокацию для нахождения ближайшего арт-объекта'
                      '\n/map - для открытия карты стрит артов с номерами и '
                      'сортировкой по районам\nВведите '
-                     'номер арта из карты и получите о нём информацию и постройте к нему маршрут')
+                     'номер арта из карты и получите о нём информацию и постройте к нему маршрут',
+                     reply_markup=webAppKeyboard())
 
 
 # команда mailing доступна только для администраторов. Для добавления администратора в .env ADMINS добавьте user_id
 @bot.message_handler(commands=['mailing'])
 def mailing(message):
     if str(message.from_user.id) in ADMINS:
-        murkup = types.ReplyKeyboardMarkup()
+        murkup = types.ReplyKeyboardMarkup(resize_keyboard=True)
         murkup.add(types.KeyboardButton('Отмена'))
         bot.send_message(message.chat.id, 'Отправьте сообщение для рассылки.', reply_markup=murkup)
         bot.register_next_step_handler(message, mailing_for_users)
@@ -105,15 +116,15 @@ def get_location(message):
         bot.send_media_group(message.chat.id, get_group_photo_files(art.photo))
         bot.send_message(message.chat.id,
                          f'{art.name}\nАвторы: {" ".join([i.name for i in authors])}\n'
-                         f'Адрес: {art.address}\n{art.about}')
+                         f'Адрес: {art.address}\n{art.about}', reply_markup=webAppKeyboard())
         # повышение рейтинга, если пользователь не приходил раньше
         if not db_sess.query(Visited).filter(Visited.user_id == user.id, Visited.art_id == art.id).first():
             db_sess.add(Visited(user_id=user.id, art_id=art.id))
             db_sess.commit()
     else:
         closer_art = db_sess.query(StreetArt).order_by(
-                        func.pow(StreetArt.longitude - user_longitude, 2) +
-                        func.pow(StreetArt.latitude - user_latitude, 2)).limit(5).all()
+            func.pow(StreetArt.longitude - user_longitude, 2) +
+            func.pow(StreetArt.latitude - user_latitude, 2)).limit(5).all()
         murcup = types.InlineKeyboardMarkup()
         line = []
         for point in closer_art:
@@ -124,69 +135,17 @@ def get_location(message):
     db_sess.close()
 
 
-# команда map для отправки карты артов
-@bot.message_handler(commands=['map'])
-def map_streetart(message):
-    bot.delete_message(message.chat.id, message.message_id)
-    db_sess = db_session.create_session()
-    coords = [f'{i.longitude},{i.latitude},pm2rdm{i.id}' for i in db_sess.query(StreetArt).all()]
-    map_link = f'https://static-maps.yandex.ru/1.x/?l=map&lang=ru_RU&size=300,' \
-               f'300&scale=1.0&pt={"~".join(coords)}&z=10'
-    murkup = types.InlineKeyboardMarkup()
-    murkup.add(types.InlineKeyboardButton('Первомайский округ', callback_data='pervomaisky'))
-    murkup.add(types.InlineKeyboardButton('Октябрьский округ', callback_data='oktyabrsky'))
-    murkup.add(types.InlineKeyboardButton('Ленинский округ', callback_data='leninsky'))
-    bot.send_photo(message.chat.id, map_link, reply_markup=murkup)
-    db_sess.close()
-
-
-# нахождение всех авторов
-@bot.callback_query_handler(func=lambda callback: True)
-def map_sort(callback):
-    db_sess = db_session.create_session()
-    points = None
-    if callback.data.isnumeric():
-        art = db_sess.query(StreetArt).filter(StreetArt.id == callback.data).first()
-        murkup = types.InlineKeyboardMarkup()
-        murkup.add(types.InlineKeyboardButton('Построить машрут',
-                                              url=f'https://yandex.ru/maps/?rtext='
-                                                  f'~{art.latitude},{art.longitude}&rtt=pd'))
-        authors = db_sess.query(Authors).join(StreetArtAuthors).filter(StreetArtAuthors.art_id == art.id).all()
-        bot.send_media_group(callback.message.chat.id, get_group_photo_files(art.photo))
-        bot.send_message(callback.message.chat.id,
-                         f'{art.name}\nАвторы: {" ".join([i.name for i in authors])}\n'
-                         f'Адрес: {art.address}\n{art.about}', reply_markup=murkup)
-        db_sess.close()
-    else:
-        if callback.data == 'leninsky':
-            points = db_sess.query(StreetArt).join(Districts).filter(Districts.name == 'Ленинский')
-        elif callback.data == 'oktyabrsky':
-            points = db_sess.query(StreetArt).join(Districts).filter(Districts.name == 'Октябрьский')
-        elif callback.data == 'pervomaisky':
-            points = db_sess.query(StreetArt).join(Districts).filter(Districts.name == 'Первомайский')
-        bot.send_photo(callback.message.chat.id, render_some_points_map(points))
-    bot.delete_message(callback.message.chat.id, callback.message.message_id)
-    db_sess.close()
-
-
-def map_author_sort(message):
-    db_sess = db_session.create_session()
-    author = db_sess.query(Authors).filter(Authors.name == message.text).first()
-    if author is not None:
-        author_places = db_sess.query(StreetArt).join(StreetArtAuthors).filter(
-            StreetArtAuthors.author_id == author.id).all()
-        bot.send_photo(message.chat.id, render_some_points_map(author_places), reply_markup=types.ReplyKeyboardRemove())
-    else:
-        bot.send_message(message.chat.id, 'Автор не найден', reply_markup=types.ReplyKeyboardRemove())
-    bot.delete_message(message.chat.id, message.message_id)
-
-
 # тип контента текст, вывод информации об объекте по его id
-@bot.message_handler(content_types=['text'])
+@bot.message_handler(content_types=['text', 'web_app_data'])
 def text(message):
+    content = None
+    if message.content_type == 'web_app_data':
+        content = message.web_app_data.data
+    elif message.content_type == 'text':
+        content = message.text
     db_sess = db_session.create_session()
-    if message.text.isnumeric():
-        art = db_sess.query(StreetArt).filter(StreetArt.id == message.text).first()
+    if content.isnumeric():
+        art = db_sess.query(StreetArt).filter(StreetArt.id == content).first()
         if art is not None:
             murkup = types.InlineKeyboardMarkup()
             murkup.add(types.InlineKeyboardButton('Построить машрут',
@@ -199,7 +158,7 @@ def text(message):
                              f'Адрес: {art.address}\n{art.about}', reply_markup=murkup)
             db_sess.close()
         else:
-            bot.send_message(message.chat.id, 'Не сущевствующий мурал')
+            bot.send_message(message.chat.id, 'Не существующий мурал')
 
 
 bot.polling(non_stop=True, interval=1, timeout=0)
